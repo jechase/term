@@ -1,3 +1,6 @@
+#![feature(rust_2018_preview, use_extern_macros)]
+#![warn(rust_2018_idioms)]
+
 // {{{ Module docs
 //! `slog-rs`'s `Drain` for terminal output
 //!
@@ -104,12 +107,6 @@
 // {{{ Imports & meta
 #![warn(missing_docs)]
 
-extern crate chrono;
-extern crate isatty;
-extern crate slog;
-extern crate term;
-extern crate thread_local;
-
 use slog::*;
 use slog::Drain;
 use slog::Key;
@@ -137,7 +134,7 @@ pub trait Decorator {
         f: F,
     ) -> io::Result<()>
     where
-        F: FnOnce(&mut RecordDecorator) -> io::Result<()>;
+        F: FnOnce(&mut dyn RecordDecorator) -> io::Result<()>;
 }
 
 impl<T: ?Sized> Decorator for Box<T>
@@ -151,7 +148,7 @@ where
         f: F,
     ) -> io::Result<()>
     where
-        F: FnOnce(&mut RecordDecorator) -> io::Result<()>,
+        F: FnOnce(&mut dyn RecordDecorator) -> io::Result<()>,
     {
         (**self).with_record(record, logger_kv, f)
     }
@@ -203,7 +200,7 @@ pub trait RecordDecorator: io::Write {
     }
 }
 
-impl RecordDecorator for Box<RecordDecorator> {
+impl RecordDecorator for Box<dyn RecordDecorator> {
     fn reset(&mut self) -> io::Result<()> {
         (**self).reset()
     }
@@ -251,8 +248,8 @@ impl RecordDecorator for Box<RecordDecorator> {
 // {{{ Misc
 /// Returns `true` if message was not empty
 fn print_msg_header(
-    fn_timestamp: &ThreadSafeTimestampFn<Output = io::Result<()>>,
-    mut rd: &mut RecordDecorator,
+    fn_timestamp: &dyn ThreadSafeTimestampFn<Output = io::Result<()>>,
+    mut rd: &mut dyn RecordDecorator,
     record: &Record,
 ) -> io::Result<bool> {
     try!(rd.start_timestamp());
@@ -286,7 +283,7 @@ where
     D: Decorator,
 {
     decorator: D,
-    fn_timestamp: Box<ThreadSafeTimestampFn<Output = io::Result<()>>>,
+    fn_timestamp: Box<dyn ThreadSafeTimestampFn<Output = io::Result<()>>>,
     use_original_order: bool,
 }
 
@@ -296,7 +293,7 @@ where
     D: Decorator,
 {
     decorator: D,
-    fn_timestamp: Box<ThreadSafeTimestampFn<Output = io::Result<()>>>,
+    fn_timestamp: Box<dyn ThreadSafeTimestampFn<Output = io::Result<()>>>,
     original_order: bool,
 }
 
@@ -421,7 +418,7 @@ where
 {
     decorator: D,
     history: RefCell<Vec<(Vec<u8>, Vec<u8>)>>,
-    fn_timestamp: Box<ThreadSafeTimestampFn<Output = io::Result<()>>>,
+    fn_timestamp: Box<dyn ThreadSafeTimestampFn<Output = io::Result<()>>>,
 }
 
 /// Streamer builder
@@ -430,7 +427,7 @@ where
     D: Decorator,
 {
     decorator: D,
-    fn_timestamp: Box<ThreadSafeTimestampFn<Output = io::Result<()>>>,
+    fn_timestamp: Box<dyn ThreadSafeTimestampFn<Output = io::Result<()>>>,
 }
 
 impl<D> CompactFormatBuilder<D>
@@ -545,14 +542,14 @@ where
 // {{{ Serializer
 struct Serializer<'a> {
     comma_needed: bool,
-    decorator: &'a mut RecordDecorator,
+    decorator: &'a mut dyn RecordDecorator,
     reverse: bool,
     stack: Vec<(String, String)>,
 }
 
 impl<'a> Serializer<'a> {
     fn new(
-        d: &'a mut RecordDecorator,
+        d: &'a mut dyn RecordDecorator,
         comma_needed: bool,
         reverse: bool,
     ) -> Self {
@@ -706,14 +703,14 @@ impl<'a> slog::ser::Serializer for Serializer<'a> {
 // {{{ CompactFormatSerializer
 
 struct CompactFormatSerializer<'a> {
-    decorator: &'a mut RecordDecorator,
+    decorator: &'a mut dyn RecordDecorator,
     history: &'a mut Vec<(Vec<u8>, Vec<u8>)>,
     buf: Vec<(Vec<u8>, Vec<u8>)>,
 }
 
 impl<'a> CompactFormatSerializer<'a> {
     fn new(
-        d: &'a mut RecordDecorator,
+        d: &'a mut dyn RecordDecorator,
         history: &'a mut Vec<(Vec<u8>, Vec<u8>)>,
     ) -> Self {
         CompactFormatSerializer {
@@ -873,12 +870,12 @@ impl<'a> slog::ser::Serializer for CompactFormatSerializer<'a> {
 // {{{ CountingWriter
 // Wrapper for `Write` types that counts total bytes written.
 struct CountingWriter<'a> {
-    wrapped: &'a mut io::Write,
+    wrapped: &'a mut dyn io::Write,
     count: usize,
 }
 
 impl<'a> CountingWriter<'a> {
-    fn new(wrapped: &'a mut io::Write) -> CountingWriter {
+    fn new(wrapped: &'a mut dyn io::Write) -> CountingWriter {
         CountingWriter {
             wrapped: wrapped,
             count: 0,
@@ -918,7 +915,7 @@ impl<'a> io::Write for CountingWriter<'a> {
 /// bounds expressed by this trait need to satisfied for a function
 /// to be used in timestamp formatting.
 pub trait ThreadSafeTimestampFn
-    : Fn(&mut io::Write) -> io::Result<()>
+    : Fn(&mut dyn io::Write) -> io::Result<()>
     + Send
     + Sync
     + UnwindSafe
@@ -928,7 +925,7 @@ pub trait ThreadSafeTimestampFn
 
 impl<F> ThreadSafeTimestampFn for F
 where
-    F: Fn(&mut io::Write) -> io::Result<()> + Send + Sync,
+    F: Fn(&mut dyn io::Write) -> io::Result<()> + Send + Sync,
     F: UnwindSafe + RefUnwindSafe + 'static,
     F: ?Sized,
 {
@@ -939,14 +936,14 @@ const TIMESTAMP_FORMAT: &'static str = "%b %d %H:%M:%S%.3f";
 /// Default local timezone timestamp function
 ///
 /// The exact format used, is still subject to change.
-pub fn timestamp_local(io: &mut io::Write) -> io::Result<()> {
+pub fn timestamp_local(io: &mut dyn io::Write) -> io::Result<()> {
     write!(io, "{}", chrono::Local::now().format(TIMESTAMP_FORMAT))
 }
 
 /// Default UTC timestamp function
 ///
 /// The exact format used, is still subject to change.
-pub fn timestamp_utc(io: &mut io::Write) -> io::Result<()> {
+pub fn timestamp_utc(io: &mut dyn io::Write) -> io::Result<()> {
     write!(io, "{}", chrono::Utc::now().format(TIMESTAMP_FORMAT))
 }
 // }}}
@@ -1005,7 +1002,7 @@ where
         f: F,
     ) -> io::Result<()>
     where
-        F: FnOnce(&mut RecordDecorator) -> io::Result<()>,
+        F: FnOnce(&mut dyn RecordDecorator) -> io::Result<()>,
     {
         f(&mut PlainRecordDecorator(&self.0))
     }
@@ -1095,7 +1092,7 @@ where
         f: F,
     ) -> io::Result<()>
     where
-        F: FnOnce(&mut RecordDecorator) -> io::Result<()>,
+        F: FnOnce(&mut dyn RecordDecorator) -> io::Result<()>,
     {
         f(&mut PlainSyncRecordDecorator {
             io: self.0.clone(),
@@ -1306,7 +1303,7 @@ impl Decorator for TermDecorator {
         f: F,
     ) -> io::Result<()>
     where
-        F: FnOnce(&mut RecordDecorator) -> io::Result<()>,
+        F: FnOnce(&mut dyn RecordDecorator) -> io::Result<()>,
     {
         let mut term = self.term.borrow_mut();
         let mut deco = TermRecordDecorator {

@@ -1,3 +1,5 @@
+cargo-features = ["edition"]
+
 [package]
 name = "slog-term"
 version = "2.4.0"
@@ -9,6 +11,7 @@ documentation = "https://docs.rs/slog-term"
 homepage = "https://github.com/slog-rs/slog"
 repository = "https://github.com/slog-rs/term"
 readme = "README.md"
+edition = "2018"
 
 [dependencies]
 slog = "2"
@@ -19,3 +22,7 @@ term = "0.5.1"
 
 [dev-dependencies]
 slog-async = "2"
+
+[patch.crates-io]
+slog = { git = "https://github.com/jechase/slog", branch = "2018_edition" }
+slog-async = { git = "https://github.com/jechase/slog-async", branch = "2018_edition" }
